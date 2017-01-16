@@ -1,0 +1,89 @@
+---
+title: "Developing Data Products: Week 2 Assignment"
+author: "Alex Ho"
+date: "January 15, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This chunk of code is to load data from the city of Los Angeles's official "Listing of Active Businesses" website, last updated January 15, 2017. More background and supporting documentation can be found at: https://data.lacity.org/A-Prosperous-City/Listing-of-Active-Businesses/6rrh-rzua
+```{r loaddata, cache=TRUE}
+library(dplyr)
+#data set is "Listing of Active Businesses" in LA
+# background: https://data.lacity.org/A-Prosperous-City/Listing-of-Active-Businesses/6rrh-rzua
+myurl <- "https://data.lacity.org/api/views/6rrh-rzua/rows.csv?accessType=DOWNLOAD"
+mydestfile <- "LAbiz.csv"
+
+# it's ~102MB
+download.file(myurl, destfile = mydestfile)
+
+#read data
+mybizdata <- read.csv(mydestfile, sep=",")
+```
+
+I arbitrarily chose "Full-service restaurants" (NAICS code = 722110) as the type of business to explore. The code below does the following:
+
+* subsets observations of NAICS code 722110 
+* as latitude and longitude coordinates were tabulated in the same variable, splits this information into two variables and removes any unnecessary characters (e.g. "(", ")", white spaces)
+* removes any blatantly incorrect observations (e.g. those with lat/lng coordinates that are blank, (0,0), or lie in other states)
+
+Note: this code is flexible enough for users to modify as needed (just update the "myNAICS" value accordingly).
+
+```{r reformdata}
+#NAICS code for "Full-service restaurants" is 722110
+myNAICS <- 722110
+myreldata <- mybizdata[which(mybizdata$NAICS==myNAICS),]
+
+#drop any rows where location is blank or (0, 0)
+zerocoords <- which(myreldata$LOCATION=="(0, 0)")
+myreldata <- myreldata[-zerocoords,]
+blankcoords <- which(myreldata$LOCATION=="")
+myreldata <- myreldata[-blankcoords,]
+
+#reform location data, because both lat and long are in a single variable
+mysplitloc <- strsplit(as.character(myreldata$LOCATION),",")
+myloc <- as.data.frame(matrix(unlist(mysplitloc), ncol=2, byrow=TRUE))
+#remove beginning and ending parentheses
+names(myloc) <- c("lat", "lng")
+myloc$lat <- gsub("\\(","", myloc$lat)
+myloc$lng <- gsub("*\\)","", myloc$lng)
+#remove any blank spaces
+myloc$lat <- as.numeric(trimws(myloc$lat))
+myloc$lng <- as.numeric(trimws(myloc$lng))
+
+myreldata$lat <- myloc$lat
+myreldata$lng <- myloc$lng
+
+#there's outlier data - some incorrectly reported coordinates that show up
+# in the image as other states
+correctdata <- subset(myreldata, lat < 35)
+```
+
+This code chunk generates the map using the Leaflet library.
+
+Note: this code is flexible enough for users to modify as needed (just update the icon metadata to your liking).
+```{r myleaflet}
+# target icon height is 45 px
+library(leaflet)
+targht = 31
+iconW = 1200
+iconH = 1200
+iconURL = "http://wall--art.com/wp-content/uploads/2014/09/restaurants-icon-png.png"
+myIcon <- makeIcon(
+     iconUrl = iconURL,
+     iconWidth = targht/iconH*iconW, iconHeight = targht
+)
+
+subset(correctdata, select=c(lat,lng)) %>%
+     leaflet() %>%
+     addTiles() %>%
+     addMarkers(icon = myIcon, clusterOptions=markerClusterOptions(), 
+                popup = paste("Name: ", correctdata$BUSINESS.NAME, "<br> Address:",
+                              correctdata$STREET.ADDRESS, ",",
+                                   correctdata$CITY, ",",
+                              correctdata$ZIP.CODE)) %>%
+     setView(lng = mean(correctdata$lng), lat=mean(correctdata$lat), zoom = 8)
+```
